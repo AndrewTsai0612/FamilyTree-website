@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>家系圖繪製工具 V5.0 - 最終定稿版</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            display: flex;
+            margin: 0;
+            height: 100vh;
+            background-color: #f0f2f5;
+        }
+        #controls {
+            width: 320px;
+            padding: 20px;
+            background-color: #ffffff;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+            overflow-y: auto;
+            border-right: 1px solid #ddd;
+        }
+        #canvas-container {
+            flex-grow: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+            overflow: hidden;
+        }
+        canvas {
+            border: 1px solid #ccc;
+            background-color: #fff;
+            cursor: default;
+        }
+        h2, h3 {
+            margin-top: 0;
+            border-bottom: 2px solid #007bff;
+            padding-bottom: 10px;
+            color: #333;
+        }
+        h3 {
+            margin-top: 25px;
+            border-bottom: 1px solid #ccc;
+            font-size: 1.1em;
+        }
+        .control-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+        input[type="text"], select {
+            width: calc(100% - 16px);
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            background-color: #007bff;
+            color: white;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 10px;
+            transition: background-color 0.2s;
+        }
+        button:disabled {
+            background-color: #a0c7e4;
+            cursor: not-allowed;
+        }
+        button:hover:not(:disabled) {
+            background-color: #0056b3;
+        }
+        #deletePerson {
+            background-color: #dc3545;
+        }
+        #deletePerson:hover:not(:disabled) {
+            background-color: #c82333;
+        }
+        #saveFile, .export-btn {
+            background-color: #28a745;
+        }
+        #saveFile:hover:not(:disabled), .export-btn:hover:not(:disabled) {
+            background-color: #218838;
+        }
+        .button-group {
+            display: flex;
+            gap: 10px;
+        }
+        #status {
+            margin-top: 15px;
+            padding: 10px;
+            background-color: #e9ecef;
+            border-radius: 4px;
+            color: #495057;
+            font-size: 0.9em;
+            min-height: 40px;
+            line-height: 1.4;
+        }
+        .small-text {
+            font-size: 0.8em;
+            color: #666;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="controls">
+        <h2>控制面板</h2>
+        
+        <div class="control-group">
+            <h3>1. 成員操作</h3>
+            <label for="personName">姓名:</label>
+            <input type="text" id="personName" placeholder="輸入姓名">
+            <div class="button-group">
+                <button id="addMale">新增男性 (□)</button>
+                <button id="addFemale">新增女性 (○)</button>
+            </div>
+            <button id="editPerson" disabled>編輯姓名</button>
+        </div>
+
+        <div class="control-group">
+            <h3>2. 狀態與結構</h3>
+            <p class="small-text">拖動時按住Shift可鎖定軸向。</p>
+            <button id="setDeceased" disabled>標記為已去世 / 復原</button>
+            <button id="setPartnership" disabled>設為伴侶</button>
+            <button id="addChild" disabled>設為子女</button>
+            <button id="addHousehold" disabled>圈選為同住家戶</button>
+            <button id="deletePerson" disabled>刪除選取</button>
+        </div>
+
+        <div class="control-group">
+            <h3>3. 設定感情關係</h3>
+            <label for="relationshipType">關係類型:</label>
+            <select id="relationshipType">
+                <option value="very_close">非常親密</option>
+                <option value="moderately_close">中等親密</option>
+                <option value="distant">少許親密或疏遠</option>
+                <option value="conflict">有衝突或關係欠佳</option>
+                <option value="cutoff">疏遠或斷絕來往</option>
+            </select>
+            <button id="setRelationship" disabled>設定關係</button>
+        </div>
+        
+        <div class="control-group">
+            <h3>4. 檔案管理</h3>
+            <button id="saveFile">儲存檔案 (.json)</button>
+            <button id="loadFile">載入檔案 (.json)</button>
+            <input type="file" id="fileInput" style="display: none;" accept=".json">
+            <hr style="margin: 20px 0; border: 0; border-top: 1px solid #eee;">
+            <button id="exportJPG" class="export-btn">匯出為圖片 (.jpg)</button>
+        </div>
+
+        <div class="control-group">
+            <h3>狀態提示</h3>
+            <div id="status">請先新增成員。</div>
+        </div>
+    </div>
+
+    <div id="canvas-container">
+        <canvas id="genogramCanvas" width="1000" height="700"></canvas>
+    </div>
+
+    <script>
+        // --- Canvas & Context, DOM Elements, Data Models, State ---
+        const canvas = document.getElementById('genogramCanvas');
+        const ctx = canvas.getContext('2d');
+        const personNameInput = document.getElementById('personName');
+        const addMaleBtn = document.getElementById('addMale');
+        const addFemaleBtn = document.getElementById('addFemale');
+        const setDeceasedBtn = document.getElementById('setDeceased');
+        const addChildBtn = document.getElementById('addChild');
+        const relationshipTypeSelect = document.getElementById('relationshipType');
+        const setRelationshipBtn = document.getElementById('setRelationship');
+        const statusDiv = document.getElementById('status');
+        const editPersonBtn = document.getElementById('editPerson');
+        const deletePersonBtn = document.getElementById('deletePerson');
+        const addHouseholdBtn = document.getElementById('addHousehold');
+        const setPartnershipBtn = document.getElementById('setPartnership');
+        const saveFileBtn = document.getElementById('saveFile');
+        const loadFileBtn = document.getElementById('loadFile');
+        const fileInput = document.getElementById('fileInput');
+        const exportJPGBtn = document.getElementById('exportJPG');
+        let people = [], relationships = [], households = [];
+        let nextPersonId = 0, nextRelationshipId = 100, nextHouseholdId = 400;
+        let selectedIds = new Set();
+        const PERSON_RADIUS = 25, GENERATION_HEIGHT = 120;
+        let isDragging = false, draggingPerson = null, dragStartX = 0, dragStartY = 0, mouseStartX = 0, mouseStartY = 0;
+        let isAxisLocked = false, dominantAxis = null;
+        let isOnlyChildLocked = false, lockedXPosition = 0;
+
+        // --- Event Listeners & Core Functions ---
+        addMaleBtn.addEventListener('click', () => addPerson('male'));
+        addFemaleBtn.addEventListener('click', () => addPerson('female'));
+        setDeceasedBtn.addEventListener('click', toggleDeceased);
+        setPartnershipBtn.addEventListener('click', () => createRelationship('partnership'));
+        addChildBtn.addEventListener('click', addChild);
+        setRelationshipBtn.addEventListener('click', () => createRelationship());
+        addHouseholdBtn.addEventListener('click', addHousehold);
+        editPersonBtn.addEventListener('click', editPersonName);
+        deletePersonBtn.addEventListener('click', deleteSelected);
+        saveFileBtn.addEventListener('click', saveToFile);
+        loadFileBtn.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', loadFromFile);
+        exportJPGBtn.addEventListener('click', exportToJPG);
+        canvas.addEventListener('mousedown', handleMouseDown);
+        canvas.addEventListener('mousemove', handleMouseMove);
+        canvas.addEventListener('mouseup', handleMouseUp);
+        canvas.addEventListener('mouseout', handleMouseUp);
+
+        function exportToJPG() {
+            const exportCanvas = document.createElement('canvas');
+            exportCanvas.width = canvas.width;
+            exportCanvas.height = canvas.height;
+            const exportCtx = exportCanvas.getContext('2d');
+            
+            exportCtx.fillStyle = '#FFFFFF';
+            exportCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+            
+            draw(exportCtx, true);
+            
+            const dataUrl = exportCanvas.toDataURL('image/jpeg', 0.9);
+            
+            const a = document.createElement('a');
+            a.href = dataUrl;
+            const defaultFileName = `家系圖-${new Date().toISOString().slice(0, 10)}.jpg`;
+            const fileName = prompt("請輸入圖片檔案名稱：", defaultFileName);
+            if (fileName) {
+                a.download = fileName.toLowerCase().endsWith('.jpg') || fileName.toLowerCase().endsWith('.jpeg') ? fileName : fileName + '.jpg';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            }
+        }
+        function saveToFile() { const defaultFileName = `家系圖-${new Date().toISOString().slice(0, 10)}`; let fileName = prompt("請輸入檔案名稱：", defaultFileName); if (fileName === null) return; fileName = fileName.trim(); if (fileName === "") fileName = defaultFileName; if (!fileName.toLowerCase().endsWith('.json')) fileName += '.json'; const dataToSave = { people, relationships, households, nextPersonId, nextRelationshipId, nextHouseholdId, version: "1.0", savedAt: new Date().toISOString() }; const jsonString = JSON.stringify(dataToSave, null, 2); const blob = new Blob([jsonString], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = fileName; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url); }
+        function loadFromFile(event) { const file = event.target.files[0]; if (!file) return; if (!confirm("載入新檔案將會覆蓋目前的所有內容，您確定嗎？")) { fileInput.value = ''; return; } const reader = new FileReader(); reader.onload = function(e) { try { const loadedData = JSON.parse(e.target.result); if (loadedData.people && loadedData.relationships) { people = loadedData.people; relationships = loadedData.relationships; households = loadedData.households || []; nextPersonId = loadedData.nextPersonId || 0; nextRelationshipId = loadedData.nextRelationshipId || 100; nextHouseholdId = loadedData.nextHouseholdId || 400; selectedIds.clear(); draw(); updateUI(); alert("檔案已成功載入！"); } else { throw new Error("無效的家系圖檔案格式。"); } } catch (error) { alert(`載入檔案時發生錯誤：${error.message}`); } finally { fileInput.value = ''; } }; reader.readAsText(file); }
+        function createRelationship(forcedType = null) { if (selectedIds.size !== 2) return; const [id1, id2] = Array.from(selectedIds); const type = forcedType || relationshipTypeSelect.value; const existingRelIndex = relationships.findIndex(r => (r.p1 === id1 && r.p2 === id2) || (r.p1 === id2 && r.p2 === id1)); if (existingRelIndex > -1) relationships.splice(existingRelIndex, 1); const newRel = { id: nextRelationshipId++, p1: id1, p2: id2, type: type, children: [] }; relationships.push(newRel); if (type === 'partnership') { const p1 = findPerson(id1); const p2 = findPerson(id2); const maxGen = Math.max(p1.generation, p2.generation); p1.generation = maxGen; p2.generation = maxGen; } selectedIds.clear(); draw(); updateUI(); }
+        function addPerson(gender) { const name = personNameInput.value.trim(); if (!name) { alert('請先輸入姓名！'); return; } const person = { id: nextPersonId++, name: name, gender: gender, isDeceased: false, x: 100 + (people.length % 5) * 80, y: 100 + Math.floor(people.length / 5) * 100, generation: 0, parentsRelId: null }; people.push(person); personNameInput.value = ''; draw(); updateUI(); }
+        function toggleDeceased() { if (selectedIds.size !== 1) return; const person = findPerson(Array.from(selectedIds)[0]); if (person) { person.isDeceased = !person.isDeceased; } draw(); }
+        function addChild() { if (selectedIds.size !== 3) { alert('請選擇一位子女和其兩位父母 (共三人)。'); return; } const ids = Array.from(selectedIds); const partnership = relationships.find(r => r.type === 'partnership' && ids.includes(r.p1) && ids.includes(r.p2)); if (!partnership) { alert('所選的三人中，沒有找到一對伴侶關係的父母。'); return; } const child = findPerson(ids.find(id => id !== partnership.p1 && id !== partnership.p2)); if (child.parentsRelId) { alert(`${child.name} 已經有父母了。`); return; } if (!partnership.children) partnership.children = []; partnership.children.push({ childId: child.id, isAdopted: false }); const parent1 = findPerson(partnership.p1); child.parentsRelId = partnership.id; child.generation = parent1.generation + 1; selectedIds.clear(); draw(); updateUI(); }
+        function addHousehold() { if (selectedIds.size > 0) { households.push({ id: nextHouseholdId++, memberIds: Array.from(selectedIds) }); selectedIds.clear(); draw(); updateUI(); } }
+        function editPersonName() { if (selectedIds.size !== 1) return; const personId = Array.from(selectedIds)[0]; const person = findPerson(personId); const newName = prompt("請輸入新的姓名：", person.name); if (newName && newName.trim() !== '') { person.name = newName.trim(); draw(); updateUI(); } }
+        function deleteSelected() { if (selectedIds.size === 0) return; const confirmDelete = confirm(`您確定要刪除選取的 ${selectedIds.size} 位成員與相關家戶標記嗎？\n此操作無法復原。`); if (confirmDelete) { const idsToDelete = Array.from(selectedIds); idsToDelete.forEach(id => { people = people.filter(p => p.id !== id); relationships = relationships.filter(r => r.p1 !== id && r.p2 !== id); relationships.forEach(r => { if (r.children) r.children = r.children.filter(c => c.childId !== id); }); households = households.map(h => { h.memberIds = h.memberIds.filter(mId => mId !== id); return h; }).filter(h => h.memberIds.length > 0); }); selectedIds.clear(); draw(); updateUI(); } }
+        function getMousePos(event) { const rect = canvas.getBoundingClientRect(); return { x: event.clientX - rect.left, y: event.clientY - rect.top }; }
+        function handleMouseDown(e) { const pos = getMousePos(e); let clickedPerson = null; for (let i = people.length - 1; i >= 0; i--) { const person = people[i]; const dist = Math.sqrt((pos.x - person.x) ** 2 + (pos.y - person.y) ** 2); if (dist < PERSON_RADIUS) { clickedPerson = person; break; } } if (clickedPerson) { isDragging = true; draggingPerson = clickedPerson; dragStartX = clickedPerson.x; dragStartY = clickedPerson.y; mouseStartX = pos.x; mouseStartY = pos.y; if (draggingPerson.parentsRelId) { const parentRel = relationships.find(r => r.id === draggingPerson.parentsRelId); if (parentRel && parentRel.children.length === 1) { const p1 = findPerson(parentRel.p1); const p2 = findPerson(parentRel.p2); if(p1 && p2) { isOnlyChildLocked = true; lockedXPosition = (p1.x + p2.x) / 2; } } } if (!e.shiftKey) { if (selectedIds.has(clickedPerson.id) && selectedIds.size === 1) {} else { selectedIds.clear(); selectedIds.add(clickedPerson.id); } } else { if (selectedIds.has(clickedPerson.id)) { selectedIds.delete(clickedPerson.id); } else { selectedIds.add(clickedPerson.id); } } } else { selectedIds.clear(); } draw(); updateUI(); }
+        function handleMouseMove(e) { const pos = getMousePos(e); const isOverPerson = people.some(p => Math.sqrt((pos.x - p.x)**2 + (pos.y - p.y)**2) < PERSON_RADIUS); canvas.style.cursor = isOverPerson ? 'move' : 'default'; if (!isDragging || !draggingPerson) return; if (isOnlyChildLocked) { draggingPerson.x = lockedXPosition; draggingPerson.y = dragStartY + (pos.y - mouseStartY); } else if (e.shiftKey) { const deltaX = Math.abs(pos.x - mouseStartX); const deltaY = Math.abs(pos.y - mouseStartY); const lockThreshold = 5; if (!isAxisLocked && (deltaX > lockThreshold || deltaY > lockThreshold)) { dominantAxis = deltaX > deltaY ? 'x' : 'y'; isAxisLocked = true; } if (isAxisLocked) { if (dominantAxis === 'x') { draggingPerson.x = dragStartX + (pos.x - mouseStartX); draggingPerson.y = dragStartY; } else { draggingPerson.x = dragStartX; draggingPerson.y = dragStartY + (pos.y - mouseStartY); } } } else { isAxisLocked = false; dominantAxis = null; const moveX = pos.x - mouseStartX; const moveY = pos.y - mouseStartY; draggingPerson.x = dragStartX + moveX; draggingPerson.y = dragStartY + moveY; } draw(); }
+        function handleMouseUp(e) { isDragging = false; draggingPerson = null; isAxisLocked = false; dominantAxis = null; isOnlyChildLocked = false; lockedXPosition = 0; }
+        
+        // --- DRAWING LOGIC (Refactored for export) ---
+        function findPerson(id) { return people.find(p => p.id === id); }
+        
+        // ===== 這是一個已修正的函式 =====
+        function draw(drawingCtx = ctx, forExport = false) {
+            // 只有在為螢幕上的主畫布繪圖時才清除。匯出時的畫布已經填好白色，不需要清除。
+            if (!forExport) {
+                drawingCtx.clearRect(0, 0, drawingCtx.canvas.width, drawingCtx.canvas.height);
+            }
+            
+            drawAllHouseholds(drawingCtx);
+            drawRelationships(drawingCtx);
+            drawPeople(drawingCtx, forExport);
+            
+            if (drawingCtx === ctx && isAxisLocked && draggingPerson) {
+                drawAxisLockLine(drawingCtx);
+            }
+        }
+        // ===== 修正結束 =====
+
+        function drawAxisLockLine(drawingCtx) { drawingCtx.beginPath(); drawingCtx.setLineDash([4, 2]); drawingCtx.strokeStyle = 'rgba(0, 0, 0, 0.4)'; drawingCtx.lineWidth = 1; if (dominantAxis === 'x') { drawingCtx.moveTo(0, draggingPerson.y); drawingCtx.lineTo(drawingCtx.canvas.width, draggingPerson.y); } else { drawingCtx.moveTo(draggingPerson.x, 0); drawingCtx.lineTo(draggingPerson.x, drawingCtx.canvas.height); } drawingCtx.stroke(); drawingCtx.setLineDash([]); }
+        function drawRelationships(drawingCtx) { relationships.forEach(rel => { const p1 = findPerson(rel.p1); const p2 = findPerson(rel.p2); if (!p1 || !p2) return; drawingCtx.setLineDash([]); drawingCtx.lineWidth = 1.5; drawingCtx.strokeStyle = '#333'; switch (rel.type) { case 'partnership': drawingCtx.beginPath(); drawingCtx.moveTo(p1.x, p1.y); drawingCtx.lineTo(p2.x, p2.y); drawingCtx.stroke(); break; case 'very_close': drawVeryCloseLine(p1, p2, drawingCtx); break; case 'moderately_close': drawingCtx.beginPath(); drawingCtx.lineWidth = 2.5; drawingCtx.moveTo(p1.x, p1.y); drawingCtx.lineTo(p2.x, p2.y); drawingCtx.stroke(); break; case 'conflict': drawWavyLine(p1, p2, drawingCtx); break; case 'distant': drawingCtx.beginPath(); drawingCtx.setLineDash([5, 5]); drawingCtx.moveTo(p1.x, p1.y); drawingCtx.lineTo(p2.x, p2.y); drawingCtx.stroke(); break; case 'cutoff': drawCutoffLine(p1, p2, drawingCtx); break; } drawingCtx.lineWidth = 1.5; if (rel.type === 'partnership' && rel.children && rel.children.length > 0) { const midX = (p1.x + p2.x) / 2; const midY = (p1.y + p2.y) / 2; const dropY = midY + GENERATION_HEIGHT / 2; const children = rel.children.map(c => findPerson(c.childId)).filter(Boolean).sort((a, b) => a.x - b.x); if (children.length === 1) { const child = children[0]; drawingCtx.beginPath(); drawingCtx.moveTo(midX, midY); drawingCtx.lineTo(midX, dropY); drawingCtx.lineTo(child.x, dropY); drawingCtx.lineTo(child.x, child.y - PERSON_RADIUS); drawingCtx.stroke(); } else if (children.length > 1) { const firstChildX = children[0].x; const lastChildX = children[children.length - 1].x; drawingCtx.beginPath(); drawingCtx.moveTo(midX, midY); drawingCtx.lineTo(midX, dropY); drawingCtx.stroke(); drawingCtx.beginPath(); drawingCtx.moveTo(firstChildX, dropY); drawingCtx.lineTo(lastChildX, dropY); drawingCtx.stroke(); children.forEach(child => { drawingCtx.beginPath(); drawingCtx.moveTo(child.x, dropY); drawingCtx.lineTo(child.x, child.y - PERSON_RADIUS); drawingCtx.stroke(); }); } } }); }
+        function drawPeople(drawingCtx, forExport = false) { people.forEach(person => { drawingCtx.setLineDash([]); drawingCtx.beginPath(); if (person.gender === 'male') { drawingCtx.rect(person.x - PERSON_RADIUS, person.y - PERSON_RADIUS, PERSON_RADIUS * 2, PERSON_RADIUS * 2); } else { drawingCtx.arc(person.x, person.y, PERSON_RADIUS, 0, 2 * Math.PI); } drawingCtx.fillStyle = '#fff'; drawingCtx.fill(); drawingCtx.strokeStyle = forExport ? '#333' : (selectedIds.has(person.id) ? '#007bff' : '#333'); drawingCtx.lineWidth = forExport ? 2 : (selectedIds.has(person.id) ? 3 : 2); drawingCtx.stroke(); drawingCtx.fillStyle = '#000'; drawingCtx.textAlign = 'center'; drawingCtx.textBaseline = 'middle'; drawingCtx.font = '14px Arial'; drawingCtx.fillText(person.name, person.x, person.y, PERSON_RADIUS * 2 - 10); if (person.isDeceased) { drawingCtx.beginPath(); drawingCtx.moveTo(person.x - PERSON_RADIUS, person.y - PERSON_RADIUS); drawingCtx.lineTo(person.x + PERSON_RADIUS, person.y + PERSON_RADIUS); drawingCtx.moveTo(person.x + PERSON_RADIUS, person.y - PERSON_RADIUS); drawingCtx.lineTo(person.x - PERSON_RADIUS, person.y + PERSON_RADIUS); drawingCtx.strokeStyle = '#333'; drawingCtx.lineWidth = 2; drawingCtx.stroke(); } }); }
+        function drawVeryCloseLine(p1, p2, drawingCtx) { const dx = p2.x - p1.x; const dy = p2.y - p1.y; const dist = Math.sqrt(dx * dx + dy * dy); if (dist < 1) return; const nx = -dy / dist; const ny = dx / dist; const spacing = 3.5; const upVectorY = ny < 0 ? ny : -ny; const upVectorX = ny < 0 ? nx : -nx; drawingCtx.beginPath(); drawingCtx.lineWidth = 2.5; drawingCtx.moveTo(p1.x - upVectorX * (spacing/2), p1.y - upVectorY * (spacing/2)); drawingCtx.lineTo(p2.x - upVectorX * (spacing/2), p2.y - upVectorY * (spacing/2)); drawingCtx.stroke(); drawingCtx.beginPath(); drawingCtx.lineWidth = 1.0; drawingCtx.moveTo(p1.x + upVectorX * (spacing/2), p1.y + upVectorY * (spacing/2)); drawingCtx.lineTo(p2.x + upVectorX * (spacing/2), p2.y + upVectorY * (spacing/2)); drawingCtx.stroke(); }
+        function drawWavyLine(p1, p2, drawingCtx) { const dx = p2.x - p1.x; const dy = p2.y - p1.y; const dist = Math.sqrt(dx * dx + dy * dy); if (dist < 1) return; const segments = Math.floor(dist / 5); if (segments < 2) { drawingCtx.beginPath(); drawingCtx.moveTo(p1.x, p1.y); drawingCtx.lineTo(p2.x, p2.y); drawingCtx.stroke(); return; } const stepX = dx / segments; const stepY = dy / segments; drawingCtx.beginPath(); drawingCtx.moveTo(p1.x, p1.y); for (let i = 1; i <= segments; i++) { const amp = 3.5; const wave = amp * Math.sin(i * Math.PI / 2); const perpDx = -dy / dist; const perpDy = dx / dist; drawingCtx.lineTo(p1.x + i * stepX + wave * perpDx, p1.y + i * stepY + wave * perpDy); } drawingCtx.stroke(); }
+        function drawCutoffLine(p1, p2, drawingCtx) { const dx = p2.x - p1.x; const dy = p2.y - p1.y; const dist = Math.sqrt(dx * dx + dy * dy); if (dist < 1) return; const segmentLength = 15; const gapLength = 8; const patternLength = segmentLength + gapLength; const nx = dx / dist; const ny = dy / dist; drawingCtx.beginPath(); let currentDist = 0; while(currentDist < dist) { const startX = p1.x + currentDist * nx; const startY = p1.y + currentDist * ny; const endDist = Math.min(currentDist + segmentLength, dist); const endX = p1.x + endDist * nx; const endY = p1.y + endDist * ny; drawingCtx.moveTo(startX, startY); drawingCtx.lineTo(endX, endY); if (endDist < dist) { const slashDist = endDist + gapLength / 2; const slashX = p1.x + slashDist * nx; const slashY = p1.y + slashDist * ny; const angle = Math.atan2(dy, dx); const slashAngle = angle + Math.PI / 3; const slashLen = 6; drawingCtx.moveTo(slashX - slashLen * Math.cos(slashAngle), slashY - slashLen * Math.sin(slashAngle)); drawingCtx.lineTo(slashX + slashLen * Math.cos(slashAngle), slashY + slashLen * Math.sin(slashAngle)); } currentDist += patternLength; } drawingCtx.stroke(); }
+        function drawAllHouseholds(drawingCtx) { households.forEach(h => { const members = h.memberIds.map(id => findPerson(id)).filter(Boolean); if (members.length === 0) return; let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity; members.forEach(m => { minX = Math.min(minX, m.x); maxX = Math.max(maxX, m.x); minY = Math.min(minY, m.y); maxY = Math.max(maxY, m.y); }); const padding = PERSON_RADIUS + 15; const centerX = (minX + maxX) / 2; const centerY = (minY + maxY) / 2; const radiusX = (maxX - minX) / 2 + padding; const radiusY = (maxY - minY) / 2 + padding; drawingCtx.beginPath(); drawingCtx.ellipse(centerX, centerY, radiusX, radiusY, 0, 0, 2 * Math.PI); drawingCtx.setLineDash([8, 6]); drawingCtx.strokeStyle = 'rgba(0, 0, 0, 0.6)'; drawingCtx.lineWidth = 1; drawingCtx.stroke(); drawingCtx.setLineDash([]); }); }
+        
+        // --- REVISED updateUI FUNCTION ---
+        function updateUI() {
+            const selectedCount = selectedIds.size;
+            editPersonBtn.disabled = selectedCount !== 1;
+            setDeceasedBtn.disabled = selectedCount !== 1;
+            setPartnershipBtn.disabled = selectedCount !== 2;
+            setRelationshipBtn.disabled = selectedCount !== 2;
+            addChildBtn.disabled = selectedCount !== 3;
+            deletePersonBtn.disabled = selectedCount === 0;
+            addHouseholdBtn.disabled = selectedCount === 0;
+            if (selectedCount === 0) { statusDiv.innerHTML = '在畫布上點擊成員以選取。拖動時按住Shift可鎖定軸向。'; } else { const selectedNames = Array.from(selectedIds).map(id => findPerson(id)?.name).filter(Boolean); statusDiv.innerHTML = `<b>已選取:</b> ${selectedNames.join(', ')}`; }
+        }
+        
+        // Initial setup
+        updateUI();
+        draw(ctx);
+    </script>
+</body>
+</html>
